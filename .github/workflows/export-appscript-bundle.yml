@@ -1,0 +1,16 @@
+name: Export Apps Script bundle
+on:
+  push:
+    paths:
+      - 'tmp/ChatGPT_Classroom_Pablo_project_bundle.json'
+  workflow_dispatch:
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apps-script-bundle
+          path: tmp/ChatGPT_Classroom_Pablo_project_bundle.json
+          if-no-files-found: error
