@@ -11,7 +11,7 @@ async function serve(request:Request):Promise<Response>{
 
   const url=new URL(request.url);
   const key=url.searchParams.get("key")||"";
-  if(key!==config.connectorPassword){
+  if(key!==config.authSecret){
     return new Response("Unauthorized",{status:401,headers:{"WWW-Authenticate":"Bearer"}});
   }
 
