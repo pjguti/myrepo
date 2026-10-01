@@ -1,0 +1,1 @@
+import { NextResponse } from "next/server"; import { oauthMetadata } from "@/lib/oauth-metadata"; export function GET(){return NextResponse.json(oauthMetadata);}
