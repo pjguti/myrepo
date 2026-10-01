@@ -4,9 +4,22 @@ export const config={
   get origin(){return origin()},
   get mcpUrl(){return `${this.origin}/mcp`},
   get authSecret(){const v=required("AUTH_SECRET");if(v.length<32)throw new Error("AUTH_SECRET must be at least 32 chars");return v},
-  get connectorPassword(){return required("CONNECTOR_PASSWORD")},
+  get connectorPassword(){return process.env.CONNECTOR_PASSWORD?.trim() || this.authSecret},
   get appsScriptUrl(){return required("APPS_SCRIPT_URL")},
   get appsScriptSecret(){return required("APPS_SCRIPT_SHARED_SECRET")},
+  get googleClientId(){return required("GOOGLE_CLIENT_ID")},
+  get googleClientSecret(){return required("GOOGLE_CLIENT_SECRET")},
+  get googleCallbackUrl(){return `${this.origin}/oauth/google/callback`},
+  get allowedEmails(){return(process.env.ALLOWED_GOOGLE_EMAILS??"pfgutierrez@fpconstruccion.es").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean)},
   get allowedCimdHosts(){return(process.env.ALLOWED_CIMD_HOSTS??"chatgpt.com").split(",").map(x=>x.trim().toLowerCase()).filter(Boolean)}
 };
+export const GOOGLE_SCOPES=[
+  "openid","email","profile",
+  "https://www.googleapis.com/auth/classroom.courses.readonly",
+  "https://www.googleapis.com/auth/classroom.topics",
+  "https://www.googleapis.com/auth/classroom.coursework.students",
+  "https://www.googleapis.com/auth/classroom.courseworkmaterials",
+  "https://www.googleapis.com/auth/classroom.announcements",
+  "https://www.googleapis.com/auth/classroom.student-submissions.students.readonly"
+] as const;
 export const MCP_SCOPES=["mcp","offline_access"] as const;
