@@ -1,0 +1,7 @@
+import type { AuthInfo } from "@modelcontextprotocol/server"; import { OAuthError, OAuthErrorCode } from "@modelcontextprotocol/server"; import { seal, unseal } from "./crypto"; import { config } from "./config";
+type Identity={clientId:string;googleSub:string;googleEmail:string;scopes:string[]}; type AccessPayload=Identity&{googleAccessToken:string}; type RefreshPayload=Identity&{googleRefreshToken:string};
+export async function issueAccess(payload:AccessPayload,requested=3300){const expiresIn=Math.max(60,Math.min(requested,3300));return{token:await seal("mcp-access",payload,expiresIn),expiresIn};}
+export function issueRefresh(payload:RefreshPayload){return seal("mcp-refresh",payload,90*24*3600);}
+export function readRefresh(token:string){return unseal<RefreshPayload>(token,"mcp-refresh");}
+export async function verifyAccessToken(token:string):Promise<AuthInfo>{try{const p=await unseal<AccessPayload>(token,"mcp-access");return{token,clientId:p.clientId,scopes:p.scopes,expiresAt:p.exp,resource:new URL(config.mcpUrl),extra:{googleSub:p.googleSub,googleEmail:p.googleEmail,googleAccessToken:p.googleAccessToken}};}catch{throw new OAuthError(OAuthErrorCode.InvalidToken,"Invalid or expired access token");}}
+export function googleToken(auth?:AuthInfo){const token=auth?.extra?.googleAccessToken;if(typeof token!=="string"||!token)throw new Error("missing_google_access_token");return token;}
