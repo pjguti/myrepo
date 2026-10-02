@@ -1,4 +1,4 @@
-const CD_VERSION = '1.0.0';
+const CD_VERSION = '1.1.0';
 const CD_DEFAULT_STATE = 'DRAFT';
 
 function onOpen() {
@@ -6,6 +6,10 @@ function onOpen() {
     .createMenu('Classroom Docente')
     .addItem('1. Configurar / cambiar curso', 'mostrarConfiguracion')
     .addItem('2. Sincronizar temas', 'sincronizarTemas')
+    .addItem('3. Crear temas faltantes desde COLA', 'crearTemasFaltantes')
+    .addSeparator()
+    .addItem('Importar paquete desde otra Sheet', 'importarPaqueteDialogo')
+    .addItem('Exportar COLA como paquete portable', 'exportarPaquetePortable')
     .addSeparator()
     .addItem('Validar cola y adjuntos', 'auditarCola')
     .addItem('Crear borradores pendientes', 'procesarCola')
@@ -110,6 +114,213 @@ function resolverTopicId_(topicValue) {
   throw new Error('Tema no resuelto o ambiguo: ' + raw);
 }
 
+
+function crearTemasFaltantes() {
+  asegurarEstructura_();
+  const ui = SpreadsheetApp.getUi();
+  const sh = SpreadsheetApp.getActive().getSheetByName('COLA');
+  const data = sh.getDataRange().getValues();
+
+  sincronizarTemas();
+  const props = PropertiesService.getDocumentProperties();
+  let map = {};
+  try { map = JSON.parse(props.getProperty('TOPICS_JSON') || '{}'); } catch(e) {}
+
+  const faltantes = [];
+  for (let i=1; i<data.length; i++) {
+    const raw = String(data[i][4] || '').trim();
+    if (!raw || /^\d+$/.test(raw)) continue;
+    try {
+      resolverTopicId_(raw);
+    } catch(e) {
+      if (!faltantes.includes(raw)) faltantes.push(raw);
+    }
+  }
+
+  if (!faltantes.length) {
+    ui.alert('No hay temas faltantes en COLA.');
+    return 0;
+  }
+
+  const resp = ui.alert(
+    'Crear temas faltantes',
+    'Se crearán en Classroom estos temas:\n\n' + faltantes.join('\n') + '\n\n¿Continuar?',
+    ui.ButtonSet.YES_NO
+  );
+  if (resp !== ui.Button.YES) return 0;
+
+  const courseId = exigirCurso_();
+  let creados = 0;
+  faltantes.forEach(name => {
+    Classroom.Courses.Topics.create({name:String(name)}, courseId);
+    registrarAudit_('CREATE_TOPIC', name, '', 'OK', '');
+    creados++;
+  });
+  sincronizarTemas();
+  ui.alert('Temas creados: ' + creados);
+  return creados;
+}
+
+function exportarPaquetePortable() {
+  asegurarEstructura_();
+  const ss = SpreadsheetApp.getActive();
+  const cola = ss.getSheetByName('COLA');
+  const adj = ss.getSheetByName('ADJUNTOS_PLAN');
+  const data = cola.getDataRange().getValues();
+
+  const name = 'CLASSROOM_PACKAGE_v1_' +
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
+
+  const out = SpreadsheetApp.create(name);
+  const pub = out.getSheets()[0];
+  pub.setName('PUBLICACIONES');
+
+  const headers = [
+    'ID','ACCION','TEMA','TITULO','DESCRIPCION','PUNTOS',
+    'FECHA_LIMITE','HORA_LIMITE','PROGRAMAR_PARA','ENLACES_JSON'
+  ];
+  pub.getRange(1,1,1,headers.length).setValues([headers]);
+
+  const rows = [];
+  for (let i=1; i<data.length; i++) {
+    const r = data[i];
+    if (!String(r[0] || '').trim()) continue;
+    rows.push([
+      r[0], r[2], r[4], r[5], r[6], r[7],
+      r[8], r[9], r[10], r[11]
+    ]);
+  }
+  if (rows.length) pub.getRange(2,1,rows.length,headers.length).setValues(rows);
+  formatearCabecera_(pub, headers.length);
+  pub.setFrozenRows(1);
+  pub.autoResizeColumns(1, headers.length);
+
+  const man = out.insertSheet('MANIFEST');
+  man.getRange('A1:B6').setValues([
+    ['CLAVE','VALOR'],
+    ['FORMAT','CLASSROOM_PACKAGE_v1'],
+    ['SOURCE_VERSION',CD_VERSION],
+    ['EXPORTED_AT',new Date()],
+    ['SOURCE_COURSE_NAME',PropertiesService.getDocumentProperties().getProperty('COURSE_NAME') || ''],
+    ['NOTE','Portable: no contiene courseId, topicId ni RESULT_ID']
+  ]);
+  formatearCabecera_(man,2);
+  man.autoResizeColumns(1,2);
+
+  if (adj && adj.getLastRow() > 1) {
+    const dst = out.insertSheet('ADJUNTOS_PLAN');
+    const av = adj.getDataRange().getValues();
+    dst.getRange(1,1,av.length,av[0].length).setValues(av);
+    formatearCabecera_(dst,av[0].length);
+    dst.setFrozenRows(1);
+    dst.autoResizeColumns(1,av[0].length);
+  }
+
+  registrarAudit_('EXPORT_PACKAGE', '', '', 'OK', out.getUrl());
+  SpreadsheetApp.getUi().alert(
+    'Paquete portable creado:\n\n' + out.getName() + '\n\n' + out.getUrl()
+  );
+  return out.getUrl();
+}
+
+function importarPaqueteDialogo() {
+  asegurarEstructura_();
+  const ui = SpreadsheetApp.getUi();
+  const r = ui.prompt(
+    'Importar paquete',
+    'Pega la URL o el ID de una Google Sheet que contenga PUBLICACIONES y, opcionalmente, ADJUNTOS_PLAN.',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (r.getSelectedButton() !== ui.Button.OK) return;
+  return importarPaqueteDesdeSheet_(r.getResponseText());
+}
+
+function importarPaqueteDesdeSheet_(urlOrId) {
+  const id = extraerSpreadsheetId_(urlOrId);
+  if (!id) throw new Error('No se ha podido obtener el ID de la Google Sheet.');
+
+  const src = SpreadsheetApp.openById(id);
+  const pub = src.getSheetByName('PUBLICACIONES');
+  if (!pub) throw new Error('El paquete no contiene la hoja PUBLICACIONES.');
+
+  const manifest = src.getSheetByName('MANIFEST');
+  if (manifest) {
+    const vals = manifest.getDataRange().getValues();
+    const map = {};
+    vals.slice(1).forEach(r => map[String(r[0]||'')] = String(r[1]||''));
+    if (map.FORMAT && map.FORMAT !== 'CLASSROOM_PACKAGE_v1') {
+      throw new Error('Formato de paquete no compatible: ' + map.FORMAT);
+    }
+  }
+
+  const pv = pub.getDataRange().getValues();
+  if (pv.length < 2) throw new Error('PUBLICACIONES está vacía.');
+
+  const headers = pv[0].map(x => String(x || '').trim());
+  const ix = {};
+  headers.forEach((h,i) => ix[h] = i);
+  ['ID','ACCION','TEMA','TITULO','DESCRIPCION','ENLACES_JSON'].forEach(h => {
+    if (ix[h] === undefined) throw new Error('Falta columna obligatoria en PUBLICACIONES: ' + h);
+  });
+
+  const dst = SpreadsheetApp.getActive().getSheetByName('COLA');
+  const existing = dst.getDataRange().getValues();
+  const existingIds = new Set(existing.slice(1).map(r => String(r[0]||'').trim()).filter(Boolean));
+
+  const courseId = exigirCurso_();
+  const rows = [];
+  for (let i=1; i<pv.length; i++) {
+    const r = pv[i];
+    const localId = String(r[ix.ID] || '').trim();
+    if (!localId) continue;
+    if (existingIds.has(localId)) {
+      throw new Error('Ya existe en COLA el ID: ' + localId + '. Importación cancelada sin mezclar datos.');
+    }
+    rows.push([
+      localId,
+      'PENDIENTE',
+      String(r[ix.ACCION] || '').trim(),
+      courseId,
+      String(r[ix.TEMA] || '').trim(),
+      String(r[ix.TITULO] || ''),
+      String(r[ix.DESCRIPCION] || ''),
+      ix.PUNTOS !== undefined ? r[ix.PUNTOS] : '',
+      ix.FECHA_LIMITE !== undefined ? r[ix.FECHA_LIMITE] : '',
+      ix.HORA_LIMITE !== undefined ? r[ix.HORA_LIMITE] : '',
+      ix.PROGRAMAR_PARA !== undefined ? r[ix.PROGRAMAR_PARA] : '',
+      String(r[ix.ENLACES_JSON] || ''),
+      '', '', '', new Date(), '', 'NO'
+    ]);
+  }
+
+  if (!rows.length) throw new Error('No hay publicaciones importables.');
+
+  dst.getRange(dst.getLastRow()+1,1,rows.length,18).setValues(rows);
+
+  const srcAdj = src.getSheetByName('ADJUNTOS_PLAN');
+  if (srcAdj && srcAdj.getLastRow() > 1) {
+    const dstAdj = SpreadsheetApp.getActive().getSheetByName('ADJUNTOS_PLAN');
+    const av = srcAdj.getRange(2,1,srcAdj.getLastRow()-1,srcAdj.getLastColumn()).getValues();
+    if (av.length) dstAdj.getRange(dstAdj.getLastRow()+1,1,av.length,av[0].length).setValues(av);
+  }
+
+  registrarAudit_('IMPORT_PACKAGE', '', '', 'OK', src.getName() + ' · ' + rows.length + ' publicaciones');
+  SpreadsheetApp.getUi().alert(
+    'Importación terminada: '+rows.length+' publicaciones.\n\n' +
+    'Siguiente paso: sincroniza temas, crea los que falten si procede y ejecuta la auditoría.'
+  );
+  return rows.length;
+}
+
+function extraerSpreadsheetId_(value) {
+  const s = String(value || '').trim();
+  if (!s) return '';
+  const m = s.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9-_]{20,}$/.test(s)) return s;
+  return '';
+}
+
 function auditarCola() {
   asegurarEstructura_();
   const sh = SpreadsheetApp.getActive().getSheetByName('COLA');
@@ -141,6 +352,8 @@ function auditarCola() {
         if (!Array.isArray(arr)) throw new Error('ENLACES_JSON debe ser un array');
         arr.forEach((x,j) => {
           if (!x || !x.url) throw new Error('adjunto '+(j+1)+' sin url');
+          const chk = auditarUrlAdjunto_(String(x.url));
+          if (!chk.ok) throw new Error('adjunto '+(j+1)+': '+chk.error);
         });
       } catch(e) {
         errors.push('Fila ' + (i+1) + ' ('+id+'): ' + e.message);
@@ -303,6 +516,28 @@ function parseLinks_(value) {
     if (!x || !x.url) throw new Error('Adjunto sin URL');
     return {link:{url:String(x.url), title:x.title ? String(x.title) : undefined}};
   });
+}
+
+
+function auditarUrlAdjunto_(url) {
+  const id = extraerDriveFileId_(url);
+  if (!id) return {ok:true, type:'external_link'};
+  try {
+    const f = DriveApp.getFileById(id);
+    f.getName();
+    return {ok:true, type:'drive'};
+  } catch(e) {
+    return {ok:false, error:'archivo de Drive no accesible para esta cuenta'};
+  }
+}
+
+function extraerDriveFileId_(url) {
+  const s = String(url || '');
+  let m = s.match(/\/d\/([a-zA-Z0-9-_]{15,})/);
+  if (m) return m[1];
+  m = s.match(/[?&]id=([a-zA-Z0-9-_]{15,})/);
+  if (m) return m[1];
+  return '';
 }
 
 function mostrarEstado() {
