@@ -1,4 +1,4 @@
-# Classroom Docente v1.1
+# Classroom Docente v1.2
 
 Plantilla **individual por docente** para preparar Google Classroom desde una Google Sheet con Apps Script vinculado.
 
@@ -110,3 +110,32 @@ El sistema:
 Google Classroom asocia el CourseWork creado a un proyecto de desarrollador. Las operaciones posteriores sobre ese CourseWork deben hacerse desde el proyecto que lo creó. Por eso cada copia docente debe conservar su propio Apps Script y no mezclar RESULT_ID generados por otras herramientas.
 
 No se publica automáticamente al alumnado en v1.
+
+
+## Aislamiento entre cursos
+
+La v1.2 introduce una protección adicional para docentes que usen una misma copia con varios cursos:
+
+- cada fila de COLA conserva su `COURSE_ID`;
+- la auditoría marca error si una fila pertenece a un curso distinto del curso activo;
+- el procesado no crea nada en Classroom si detecta esa discrepancia;
+- la recreación tampoco borra ni recrea elementos si la fila no pertenece al curso activo.
+
+Esto evita publicar accidentalmente en otro curso al cambiar de curso activo.
+
+## Publicación programada
+
+`PROGRAMAR_PARA` queda deliberadamente deshabilitado en v1.2.
+
+La herramienta sólo crea `DRAFT`. La publicación al alumnado, inmediata o programada, se realiza manualmente desde Google Classroom por el docente.
+
+## Recreación segura
+
+La recreación es ahora fila a fila:
+
+1. se crea un backup completo de COLA;
+2. para cada fila marcada se comprueba curso, tipo y RESULT_ID;
+3. se borra sólo ese objeto;
+4. se recrea inmediatamente como DRAFT;
+5. se registra el nuevo RESULT_ID;
+6. si una fila falla, las demás pueden continuar y el error queda registrado.
