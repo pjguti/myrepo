@@ -53,3 +53,27 @@ Cada adjunto usa:
 ```
 
 v1 utiliza enlaces. Una versión posterior podrá distinguir DriveFile, YouTube y Link para aprovechar capacidades específicas de Classroom.
+
+
+## Transporte recomendado en v1.1
+
+`CLASSROOM_PACKAGE_v1` se transporta como una Google Sheet con estas hojas:
+
+- `PUBLICACIONES`
+- `MANIFEST`
+- `ADJUNTOS_PLAN` (opcional)
+
+### PUBLICACIONES
+
+Columnas:
+
+`ID | ACCION | TEMA | TITULO | DESCRIPCION | PUNTOS | FECHA_LIMITE | HORA_LIMITE | PROGRAMAR_PARA | ENLACES_JSON`
+
+Al importar, la instancia del profesor receptor añade automáticamente:
+- su `courseId`;
+- estado `PENDIENTE`;
+- campos locales de resultado vacíos.
+
+### Regla de colisión
+
+Si un `ID` del paquete ya existe en la COLA de destino, la importación se detiene para evitar mezclar o sobrescribir publicaciones.
