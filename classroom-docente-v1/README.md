@@ -1,4 +1,4 @@
-# Classroom Docente v1
+# Classroom Docente v1.1
 
 Plantilla **individual por docente** para preparar Google Classroom desde una Google Sheet con Apps Script vinculado.
 
@@ -63,12 +63,34 @@ Para una nueva publicación: `ESTADO=PENDIENTE`.
 
 1. Configurar curso.
 2. Sincronizar temas.
-3. Importar/rellenar COLA.
-4. Ejecutar **Validar cola y adjuntos**.
-5. Corregir cualquier error.
-6. Ejecutar **Crear borradores pendientes**.
-7. Revisar manualmente Classroom.
-8. Publicar manualmente cuando corresponda.
+3. Importar un paquete portable o rellenar COLA.
+4. Crear los temas faltantes desde COLA si procede.
+5. Ejecutar **Validar cola y adjuntos**.
+6. Corregir cualquier error.
+7. Ejecutar **Crear borradores pendientes**.
+8. Revisar manualmente Classroom.
+9. Publicar manualmente cuando corresponda.
+
+## Portabilidad entre docentes y cursos
+
+La v1.1 permite exportar la COLA actual como una Google Sheet `CLASSROOM_PACKAGE_v1`.
+
+El paquete incluye:
+- `PUBLICACIONES`: datos portables de tareas/materiales/anuncios.
+- `MANIFEST`: versión y procedencia.
+- `ADJUNTOS_PLAN`: inventario de materiales, si existe.
+
+No incluye `courseId`, `topicId`, `RESULT_ID` ni correo del profesor.
+
+Otro docente, desde su propia copia de Classroom Docente, puede:
+1. configurar uno de sus cursos;
+2. importar el paquete;
+3. sincronizar temas;
+4. crear los temas que falten;
+5. validar;
+6. crear borradores.
+
+Los adjuntos de Drive se auditan para comprobar que la cuenta del docente puede acceder a ellos. Si el paquete procede de otro profesor, deberán compartirse previamente o copiarse al Drive del profesor receptor.
 
 ## Recreación
 
