@@ -1,4 +1,4 @@
-const CD_VERSION = '1.1.0';
+const CD_VERSION = '1.2.0';
 const CD_DEFAULT_STATE = 'DRAFT';
 
 function onOpen() {
@@ -327,6 +327,7 @@ function auditarCola() {
   const data = sh.getDataRange().getValues();
   const errors = [];
   let ready = 0;
+  const activeCourseId = exigirCurso_();
 
   for (let i=1; i<data.length; i++) {
     const row = data[i];
@@ -336,6 +337,15 @@ function auditarCola() {
     const title = String(row[5] || '').trim();
     const topic = String(row[4] || '').trim();
     const links = String(row[11] || '').trim();
+    const rowCourseId = String(row[3] || '').trim();
+    const scheduled = row[10];
+
+    if (rowCourseId && rowCourseId !== activeCourseId) {
+      errors.push('Fila ' + (i+1) + ' ('+id+'): COURSE_ID pertenece a otro curso. Activo=' + activeCourseId + ', fila=' + rowCourseId);
+    }
+    if (scheduled) {
+      errors.push('Fila ' + (i+1) + ' ('+id+'): PROGRAMAR_PARA no está permitido; Classroom Docente v1 sólo crea DRAFT para publicación manual.');
+    }
 
     if (!['CREATE_ASSIGNMENT','CREATE_MATERIAL','CREATE_ANNOUNCEMENT'].includes(action)) {
       errors.push('Fila ' + (i+1) + ' ('+id+'): ACCION no válida');
@@ -389,6 +399,23 @@ function procesarCola() {
   for (let i=1; i<data.length; i++) {
     const row = data[i];
     if (String(row[1] || '').toUpperCase() !== 'PENDIENTE') continue;
+
+    const rowCourseId = String(row[3] || '').trim();
+    if (rowCourseId && rowCourseId !== courseId) {
+      sh.getRange(i+1,2).setValue('ERROR');
+      sh.getRange(i+1,15).setValue('COURSE_ID de la fila no coincide con el curso activo.');
+      sh.getRange(i+1,17).setValue(new Date());
+      registrarAudit_('CREATE', String(row[0]||''), '', 'ERROR', 'COURSE_ID distinto del curso activo');
+      continue;
+    }
+
+    if (row[10]) {
+      sh.getRange(i+1,2).setValue('ERROR');
+      sh.getRange(i+1,15).setValue('PROGRAMAR_PARA no permitido: la v1 sólo crea DRAFT para publicación manual.');
+      sh.getRange(i+1,17).setValue(new Date());
+      registrarAudit_('CREATE', String(row[0]||''), '', 'ERROR', 'PROGRAMAR_PARA no permitido');
+      continue;
+    }
 
     try {
       const result = crearDesdeFila_(courseId, row);
@@ -454,7 +481,7 @@ function recrearSeleccionados() {
   const ui = SpreadsheetApp.getUi();
   const response = ui.alert(
     'Recrear borradores',
-    'Se borrarán y recrearán SOLO las filas con RECREAR = SI y con RESULT_ID registrado. Todo volverá a crearse como DRAFT. ¿Continuar?',
+    'Se recrearán SOLO las filas con RECREAR = SI y RESULT_ID registrado. Cada fila se borra y se vuelve a crear inmediatamente como DRAFT. ¿Continuar?',
     ui.ButtonSet.YES_NO
   );
   if (response !== ui.Button.YES) return;
@@ -467,34 +494,63 @@ function recrearSeleccionados() {
   const stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyyMMdd_HHmmss');
   const backup = sh.copyTo(ss).setName('BACKUP_'+stamp);
 
-  let count = 0;
+  let ok = 0;
+  let errors = 0;
+
   for (let i=1; i<data.length; i++) {
     const row = data[i];
     const recreate = String(row[17] || '').trim().toUpperCase();
     if (!['SI','SÍ','YES','TRUE','1'].includes(recreate)) continue;
 
+    const localId = String(row[0] || '').trim();
     const resultId = String(row[12] || '').trim();
     const action = String(row[2] || '').toUpperCase();
-    if (!resultId) throw new Error('Fila '+(i+1)+': RECREAR=SI pero RESULT_ID vacío');
+    const rowCourseId = String(row[3] || '').trim();
 
-    if (action === 'CREATE_ASSIGNMENT') {
-      Classroom.Courses.CourseWork.remove(courseId, resultId);
-    } else if (action === 'CREATE_MATERIAL') {
-      Classroom.Courses.CourseWorkMaterials.remove(courseId, resultId);
-    } else {
-      throw new Error('Fila '+(i+1)+': recreación no soportada para '+action);
+    try {
+      if (!resultId) throw new Error('RECREAR=SI pero RESULT_ID vacío');
+      if (rowCourseId && rowCourseId !== courseId) {
+        throw new Error('COURSE_ID de la fila no coincide con el curso activo');
+      }
+      if (row[10]) {
+        throw new Error('PROGRAMAR_PARA no permitido en v1');
+      }
+
+      if (action === 'CREATE_ASSIGNMENT') {
+        Classroom.Courses.CourseWork.remove(courseId, resultId);
+      } else if (action === 'CREATE_MATERIAL') {
+        Classroom.Courses.CourseWorkMaterials.remove(courseId, resultId);
+      } else {
+        throw new Error('Recreación no soportada para ' + action);
+      }
+
+      const result = crearDesdeFila_(courseId, row);
+
+      sh.getRange(i+1,2).setValue('PROCESADO');
+      sh.getRange(i+1,13).setValue(result && result.id ? String(result.id) : '');
+      sh.getRange(i+1,14).setValue(result && result.alternateLink ? String(result.alternateLink) : '');
+      sh.getRange(i+1,15).clearContent();
+      sh.getRange(i+1,17).setValue(new Date());
+      sh.getRange(i+1,18).setValue('NO');
+
+      registrarAudit_('RECREATE', localId, result && result.id ? String(result.id) : '', 'OK', 'reemplaza ' + resultId);
+      ok++;
+    } catch(err) {
+      const msg = String(err && err.message ? err.message : err);
+      sh.getRange(i+1,2).setValue('ERROR');
+      sh.getRange(i+1,15).setValue(msg);
+      sh.getRange(i+1,17).setValue(new Date());
+      registrarAudit_('RECREATE', localId, resultId, 'ERROR', msg);
+      errors++;
     }
-
-    sh.getRange(i+1,2).setValue('PENDIENTE');
-    sh.getRange(i+1,13,1,3).clearContent();
-    sh.getRange(i+1,17).clearContent();
-    sh.getRange(i+1,18).setValue('NO');
-    count++;
   }
 
-  procesarCola();
-  registrarAudit_('RECREATE_BATCH', '', '', 'OK', count+' filas; backup '+backup.getName());
-  ui.alert('Recreación terminada para '+count+' filas. Revisa ESTADO/ERROR antes de publicar.');
+  registrarAudit_('RECREATE_BATCH', '', '', errors ? 'ERROR' : 'OK', ok+' correctas; '+errors+' errores; backup '+backup.getName());
+  ui.alert(
+    'Recreación terminada.\n\nCorrectas: '+ok+'\nErrores: '+errors+
+    '\nBackup: '+backup.getName()+
+    '\n\nRevisa ESTADO y ERROR antes de publicar.'
+  );
 }
 
 function aplicarFecha_(resource, dateValue, timeValue) {
