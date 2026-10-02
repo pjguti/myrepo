@@ -7,6 +7,7 @@ export const config={
   get connectorPassword(){return process.env.CONNECTOR_PASSWORD?.trim() || this.authSecret},
   get appsScriptUrl(){return required("APPS_SCRIPT_URL")},
   get appsScriptSecret(){return required("APPS_SCRIPT_SHARED_SECRET")},
+  get allowedCourseId(){return required("ALLOWED_COURSE_ID")},
   get googleClientId(){return required("GOOGLE_CLIENT_ID")},
   get googleClientSecret(){return required("GOOGLE_CLIENT_SECRET")},
   get googleCallbackUrl(){return `${this.origin}/oauth/google/callback`},
