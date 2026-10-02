@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    body{font-family:Arial,sans-serif;padding:16px;color:#17212B}
+    h2{color:#A7182F;margin-top:0}
+    label{display:block;font-weight:700;margin:12px 0 6px}
+    select,button{width:100%;box-sizing:border-box;padding:9px}
+    button{margin-top:14px;background:#A7182F;color:white;border:0;border-radius:4px;cursor:pointer}
+    .small{font-size:12px;color:#555;margin-top:10px}
+    #status{margin-top:12px;white-space:pre-wrap}
+  </style>
+</head>
+<body>
+  <h2>Classroom Docente</h2>
+  <div id="who"></div>
+  <label for="course">Curso de Google Classroom</label>
+  <select id="course"></select>
+  <button onclick="save()">Guardar y sincronizar temas</button>
+  <div class="small">El sistema crea tareas y materiales como BORRADOR. La publicación al alumnado queda en manos del docente.</div>
+  <div id="status"></div>
+<script>
+function load(){
+  google.script.run.withSuccessHandler(data=>{
+    document.getElementById('who').textContent='Cuenta: '+(data.email||'');
+    const s=document.getElementById('course');
+    data.courses.forEach(c=>{
+      const o=document.createElement('option');
+      o.value=c.id;
+      o.textContent=c.name+(c.section?' · '+c.section:'');
+      if(c.id===data.selectedCourseId)o.selected=true;
+      s.appendChild(o);
+    });
+    if(!data.courses.length) document.getElementById('status').textContent='No se han encontrado cursos activos donde seas docente.';
+  }).getSetupData();
+}
+function save(){
+  const id=document.getElementById('course').value;
+  if(!id)return;
+  document.getElementById('status').textContent='Configurando…';
+  google.script.run
+    .withSuccessHandler(r=>document.getElementById('status').textContent='Configurado: '+r.name+'\nPuedes cerrar esta barra lateral.')
+    .withFailureHandler(e=>document.getElementById('status').textContent='ERROR: '+e.message)
+    .guardarCurso(id);
+}
+load();
+</script>
+</body>
+</html>
